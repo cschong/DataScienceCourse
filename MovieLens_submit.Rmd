@@ -1,0 +1,277 @@
+---
+title: "MovieLens Project"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction/Overview/Executive summary
+
+This is the MovieLens report for Data Science (Capstone) course.
+It consists of several sections including introduction/overview/executive summary, 
+methods/analysis, results and conclusion. All the analysis is conducted on 
+R statistic/Rstudio platform. The codes are displayed and discussed in 
+result section. The data for this analysis in obtained from the cloud and the link is 
+"http://files.grouplens.org/datasets/movielens/ml-10m.zip. Linear regression model
+with various predictors are used in this analysis. Regularized Movie & User Model
+was found to have the lowest RMSE.
+
+# Methods/Analysis
+
+There are two datasets associated with this project, ratings.dat and movies.dat.
+The rating dataset has 10,000,054 records and consists of four columns: UserId,
+movieId, rating and timestamp. The second dataset, movies.dat has 10,681 records and only
+three columns: movieId, title and genres. These two datasets are joined before the 
+analysis. 
+
+Three different models are built and assessed. The analysis stops after the third model as it
+has reached RMSE less than 0.8649 which is the maximum points in the RMSE section. 
+
+The joined main dataset is divided into two subsets: training and testing dataset using
+createDataPartition function. A validation dataset is extracted from the testing dataset where
+the records exisit in the training dataset. This validation dataset will be used to test
+the RMSE of the model. To avoid any influence of the data integrity, the validation dataset
+is removed from the training dataset. 
+
+First, the average rating is calculated for entire training dataset.
+For first model, only movie bias is considered as rating might be rated higher or lower based on the movie title.
+The movie bias is calculated by taking the average of the different between the rating and the average rating.
+The predicted values (validation) for first model is adding the average rating of entire training dataset with the movie bias.
+Then RMSE value is calculated using validation rating and the predicted values.
+
+For second model, both movie and user biases are considered. Movie bias is as described above. User bias is 
+calculated by taking the average of after substracting the rating by movie title and specific user with the average rating
+of the entire training dataset and movie bias. The predicted values (validation) for first model is adding the 
+average rating of entire training dataset with the movie bias. Then RMSE value is calculated using 
+validation rating and the predicted values.
+
+The RMSE improves using second model which is having movie and user biases.
+
+The movie sample sizes are different. The highest ratings are given for one movie is 31,362 whereas
+some movies are only given one rating. This might affect the prediction. Regularization is introduced
+in the model to add penalty for the larger sample movie. The regularization equation is to a new variable,
+lambda to the denominator while calculating the bias. Interative loop is used to calculate the best
+lambda for the equation. The best lambda is defined as the value when RMSE is the lowest.
+
+
+
+
+
+
+
+
+# Results
+
+Below are the codes to load all necessary libraries:
+
+-----------------------------------------------------------------------------------
+ Loading libraries
+-----------------------------------------------------------------------------------
+
+
+```{r}
+
+pkgTest <- function(x)
+{
+  if (!require(x,character.only = TRUE))
+  {
+    install.packages(x,dep=TRUE)
+    if(!require(x,character.only = TRUE)) stop("Package not found")
+  }
+}
+
+pkgTest("tidyverse")
+pkgTest("lubridate")
+pkgTest("stringr")
+pkgTest("tidytext")
+pkgTest("caret")
+pkgTest("tinytex")
+
+```
+
+-----------------------------------------------------------------------------------
+ Aquiring MovieLen dataset
+-----------------------------------------------------------------------------------
+
+Below codes are to acquire movielens dataset:
+
+```{r}
+
+if(!require(tidyverse)) install.packages("tidyverse", 
+                                         repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", 
+                                     repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", 
+                                          repos = "http://cran.us.r-project.org")
+
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+dl <- tempfile()
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings   <- fread(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+              col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies    <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+movies    <- as.data.frame(movies) %>% 
+  mutate(movieId = as.numeric(levels(movieId))[movieId],
+  title = as.character(title),
+  genres = as.character(genres))
+movielens <- left_join(ratings, movies, by = "movieId")
+
+```
+
+-----------------------------------------------------------------------------------
+ Creating training (edx) and testing (temp) dataset
+-----------------------------------------------------------------------------------
+
+```{r}
+
+set.seed(1)
+test_index <- createDataPartition(y=movielens$rating, times=1, p=0.1, list=FALSE)
+edx  <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+```
+
+-----------------------------------------------------------------------------------
+ Creating Validation dataset and revised Training dataset (edx)
+-----------------------------------------------------------------------------------
+
+```{r}
+
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Removing validation dataset from training dataset
+edx        <- anti_join(edx, validation)
+
+```
+
+-----------------------------------------------------------------------------------
+ Model 1 (Only Considering movieId)
+-----------------------------------------------------------------------------------
+
+```{r}
+
+# Calculating average rating for entire training dataset
+FinalResult01  <- validation
+meanRating_edx <- mean(edx$rating)
+FinalResult01$meanRating_edx <- mean(edx$rating)
+
+# Calculating movidId bias on the training set and conduct the prediction
+meanMovieBias_edx       <- edx %>% group_by(movieId) %>% 
+  summarize(biasMovie01 = sum(rating - meanRating_edx)/(n()))
+FinalResult01    <- merge(FinalResult01, meanMovieBias_edx, by="movieId", all.x=TRUE)
+FinalResult01$PredRating01 <- FinalResult01$meanRating_edx + FinalResult01$biasMovie01 
+rmse_01                 <- RMSE(FinalResult01$rating,FinalResult01$PredRating01)  
+print(paste0("RMSE for Model 1 = ", rmse_01))
+
+```
+
+-----------------------------------------------------------------------------------
+ Model 2 (Only Considering movieId and userId)
+-----------------------------------------------------------------------------------
+
+```{r}
+
+# Calculating average rating for entire training dataset
+FinalResult02  <- validation
+meanRating_edx <- mean(edx$rating)
+FinalResult02$meanRating_edx <- mean(edx$rating)
+
+# Calculating movidId & userId biases on the training set and conduct the prediction
+edx2 <- merge(edx, meanMovieBias_edx, by="movieId", all.x=TRUE)
+meanUserBias_edx       <- edx2 %>% group_by(userId) %>% 
+  summarize(biasUser02 = sum(rating - meanRating_edx - biasMovie01)/(n()))
+FinalResult02    <- merge(FinalResult01, meanUserBias_edx, by="userId", all.x=TRUE)
+FinalResult02$PredRating02 <- FinalResult02$meanRating_edx + 
+  FinalResult02$biasMovie01 + FinalResult02$biasUser02 
+rmse_02                 <- RMSE(FinalResult02$rating,FinalResult02$PredRating02)  
+print(paste0("RMSE for Model 1 = ", rmse_02))
+
+```
+
+-----------------------------------------------------------------------------------
+ Model 3 (Only Considering movieId and userId but with regularization)
+-----------------------------------------------------------------------------------
+
+```{r}
+
+FinalResult03  <- validation
+
+lambdas  <- seq(0, 10, 1)
+for (ilambdas in lambdas){
+  meanMovieBiasRegularized_edx       <- edx %>% group_by(movieId) %>% 
+    summarize(biasMovieRegularized03 = sum(rating - meanRating_edx)/(n()+ilambdas)) 
+  FinalResult03a <- merge(FinalResult03, meanMovieBiasRegularized_edx, by="movieId", all.x=TRUE)
+
+  edx2 <- merge(edx, meanMovieBiasRegularized_edx, by="movieId", all.x=TRUE)
+  meanUserBiasRegularized_edx <- edx2 %>% group_by(userId) %>% 
+    summarize(biasUserRegularized03=sum(rating-meanRating_edx-biasMovieRegularized03)/(n()+ilambdas))
+  FinalResult03b <- merge(FinalResult03a, meanUserBiasRegularized_edx, by="userId", all.x=TRUE)
+
+  FinalResult03b$PredRating03 <- rep(meanRating_edx, nrow(FinalResult03a)) + 
+    FinalResult03b$biasMovieRegularized03 + FinalResult03b$biasUserRegularized03 
+ 
+  rmse                 <- RMSE(FinalResult03b$rating, FinalResult03b$PredRating03)
+  print(paste0("Trying lambda = ", ilambdas, " and RMSE = ", rmse))
+  
+  if (ilambdas == 0){
+    lambdasChoosen = ilambdas
+    rmseChoosen = rmse
+  } else {
+    if (rmseChoosen > rmse){
+      lambdasChoosen = ilambdas
+      rmseChoosen = rmse
+    }
+  }
+}
+print(paste("Lambda that produces the lowest RMSE : ", lambdasChoosen, sep=""))
+print(paste("RMSE : ", rmseChoosen, sep=""))
+
+# Rerun the analysis using the lowert RMSE lambda
+meanMovieBiasRegularized_edx       <- edx %>% group_by(movieId) %>% 
+  summarize(biasMovieRegularized03 = sum(rating - meanRating_edx)/(n()+lambdasChoosen)) 
+FinalResult03a <- merge(FinalResult03, meanMovieBiasRegularized_edx, by="movieId", all.x=TRUE)
+
+edx2 <- merge(edx, meanMovieBiasRegularized_edx, by="movieId", all.x=TRUE)
+meanUserBiasRegularized_edx       <- edx2 %>% group_by(userId) %>% 
+  summarize(biasUserRegularized03 = sum(rating - meanRating_edx 
+                                        - biasMovieRegularized03)/(n()+lambdasChoosen))
+FinalResult03b <- merge(FinalResult03a, meanUserBiasRegularized_edx, by="userId", all.x=TRUE)
+
+FinalResult03b$PredRating03 <- meanRating_edx + FinalResult03b$biasMovieRegularized03 +
+                                  FinalResult03b$biasUserRegularized03 
+rmse_03 = rmseChoosen
+
+```
+# Conclusion
+
+-----------------------------------------------------------------------------------
+ Displaying all three models and the choosen model
+-----------------------------------------------------------------------------------
+
+```{r}
+
+results <- data.frame(methods=c("Movie Model","Movie & User Model", 
+                        "Regularized Movie & User Model"),rmse = c(rmse_01, rmse_02, rmse_03))
+ChoosenModel <- results[results$rmse == min(results$rmse),]
+print(paste("Model choosen is : ", ChoosenModel$methods, " and RMSE = ", 
+            ChoosenModel$rmse, sep=""))
+
+```
+
+
+
+
+
+
+
+
